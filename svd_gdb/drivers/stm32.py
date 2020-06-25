@@ -118,7 +118,30 @@ class STM32F1Pin(base.Pin):
         if cnfmode:
             self._setoutl(out)
 
-class STM32F3Pin(base.Pin):
+def STM32F3Pin(parent, port, pinnumber):
+    pinname = 'P%s%d'%(port._name[-1:], pinnumber)
+
+    analog_map = {'PC0':6,
+                  'PC1':7,
+                  'PC2':8,
+                  'PC3':9,
+                  'PA0':1,
+                  'PA1':2,
+                  'PA2':3,
+                  'PA3':4,
+                  'PA4':5,
+                  'PA6':10,
+                  'PA7':15,
+                  'PB0':11,
+                  'PB1':12,
+                  'PB11':14,
+                  'PB13':13}
+    if pinname in analog_map:
+        return STM32F3AnalogPin(parent, port, pinnumber, analog_map[pinname])
+    else:
+        return STM32F3DigitalPin(parent, port, pinnumber)
+
+class STM32F3DigitalPin(base.Pin):
     def __init__(self, parent, port, pinnumber):
         self.parent = parent
         self.port = port
@@ -152,14 +175,17 @@ class STM32F3Pin(base.Pin):
         self._setoutl(val)
         self._setout()
 
+    def _set_moder(self, new_mode):
+        moder = self.port.MODER
+        moder &= ~(0b11 << (2*self.pinnumber))
+        moder |= new_mode << (2*self.pinnumber)
+        self.port.MODER=moder
+
     def _setin(self):
-        self.port.MODER &= ~(0b11 << (2*self.pinnumber))
+        self._set_moder(0)
 
     def _setout(self):
-        "Sets to 10 MHz push-pull"
-        reg = self.port.MODER & ~(0b11 << (2*self.pinnumber))
-        reg |= 0b01 << (2*self.pinnumber)
-        self.port.MODER = reg
+        self._set_moder(1)
 
     @property
     def pull(self):
@@ -180,6 +206,26 @@ class STM32F3Pin(base.Pin):
         reg = self.port.PUPDR & ~(3 << (2*self.pinnumber))
         reg |= pupdr << (2*self.pinnumber)
         self.port.PUPDR = reg
+
+class STM32F3AnalogPin(STM32F3DigitalPin):
+    def __init__(self, parent, port, pinnumber, analog_ch):
+        super().__init__(parent,port,pinnumber)
+        self.analog_ch = analog_ch
+
+    @property
+    def v(self):
+        return 3.3*self.rawadc/4096
+
+    @property
+    def rawadc(self):
+        self.parent._init_adc()
+        adc = self.parent.ADC
+        self._set_moder(3)
+
+        adc.SQR1 = self.analog_ch << adc.SQR1.SQ1._bit_offset
+        adc.CR.ADSTART = 1
+        # USB delay is enough
+        return adc.DR
 
 class STM32F(svd_gdb.Device):
     sdk = "/opt/cubeMX/Drivers"
@@ -238,6 +284,7 @@ class STM32F3(STM32F):
         self._ports_on(self.RCC.AHBENR)
         self._gdb.make_stub.cflags.append('-mcpu=cortex-m4')
         self._gdb.make_stub.include_path.append(self.sdk+'/CMSIS/Device/ST/STM32F3xx/Include')
+        self._adc_initted = False
 
     def _add_pins(self, port, pins=8):
 
@@ -245,6 +292,31 @@ class STM32F3(STM32F):
             pin = STM32F3Pin(self, port, pin_number)
             setattr(self, pin.name, pin)
             self._pins.append(pin)
+
+    def _init_adc(self):
+        if not self._adc_initted:
+            # Have to assume no adc is set up.
+            self.RCC.AHBRSTR.ADC1RST = 1
+            self.RCC.AHBRSTR.ADC1RST = 0
+            self.RCC.CFGR2.ADC1PRES = 0
+            self.RCC.AHBENR.ADC1EN = 1
+            adc = self.ADC
+            adc.CRR.CKMODE = 1 # async
+            adc.CR = 0 # All off, regulator prep
+            adc.CR.ADVREGEN = 1 # regulator on
+
+            adc.CR.ADCALDIF = 0
+            adc.CR.ADCAL = 1
+            while (adc.CR.ADCAL):
+                pass
+
+            adc.CR.ADEN = 1
+            adc.CFGR = 0
+            adc.CFGR.OVRMOD = 1 # enable overrun
+            adc.SMPR1 = 0
+            adc.SMPR1.SMP1 = 5 # 61.5 ADC cycles
+            adc.DIFSEL = 0
+            self._adc_initted = True
 
 class STM32F103(STM32F1):
     svd_name = 'STM32F103xx.svd'
