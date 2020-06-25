@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 setup(name='svd_gdb',
-      version='0.0.1',
+      version='0.0.2',
       description='Python interface to SVD files through GDB',
       url='http://github.com/markrages/svd_gdb',
       author='Mark Rages',
