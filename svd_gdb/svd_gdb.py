@@ -15,9 +15,9 @@ def bool0(s):
     return s in ['1','true']
 
 from .mutable_number import MutableInteger
-class Int32(MutableInteger):
+class Int32(int):
     def __str__(self):
-        return "0x%08x"%self._n
+        return "0x%08x"%self
 
     def __repr__(self):
         return "0x%08x"%self
@@ -243,11 +243,11 @@ class Field(SvdObj, MutableInteger):
         return IntX(self._bit_width, ret, extra=extra)
 
     @property
-    def n(self):
+    def _n(self):
         return self._get()
 
-    @n.setter
-    def n(self, v):
+    @_n.setter
+    def _n(self, v):
         return self._set(v)
 
     def __repr__(self):
@@ -297,13 +297,13 @@ class Register(SvdObj, FieldHaver, MutableInteger):
         return self._gdb.write32(self._address, int(value))
 
     def _set_bit(self, bit):
-        return self._gdb.set_bit(self._address, bool(bit))
+        return self._gdb.set_bit(self._address, bit)
 
     def _clear_bit(self, bit):
-        return self._gdb.clear_bit(self._address, bool(bit))
+        return self._gdb.clear_bit(self._address, bit)
 
     def _is_bit_set(self, bit):
-        return self._gdb.is_bit_set(self._address, bool(bit))
+        return self._gdb.is_bit_set(self._address, bit)
 
     def _repr_no_get(self):
         return super().__repr__()
@@ -422,7 +422,7 @@ def fixup_eg_name(n):
         return False
 
 def make_cls_or_array(svd, parent, cls):
-    """If there is no dim, just createa a new object and return it.
+    """If there is no dim, just create a new object and return it.
     If there is a plain dim like NAME[%s] then we need to return array-like.
     If there is a dimIndex defined, then we need to return a list.
 
