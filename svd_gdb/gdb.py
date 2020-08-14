@@ -31,7 +31,7 @@ def unhexify(s):
     """Convert a hex-encoded bytes into bytes object"""
     return bytes.fromhex(s.decode())
 
-class GetPacketTimoutException(Exception):
+class GetPacketTimeoutException(Exception):
     pass
 
 class InvalidStubResponseException(Exception):
@@ -46,13 +46,19 @@ class FakeSocket():
     def send(self, data):
         self.file.write(data)
 
+    def gettimeout(self):
+        return self.file.timeout
+
+    def settimeout(self, seconds):
+        self.file.timeout = seconds
+
     def recv(self, bufsize):
         return self.file.read(bufsize)
 
     def flushInput(self):
-        #print "hanging out",
+        #print("hanging out",)
         extra = self.file.read(self.file.inWaiting())
-        #print extra
+        #print(extra)
 
 class FlashMemory(object):
     def __init__(self, flash_ranges):
@@ -176,6 +182,14 @@ class Target(FlashMemory):
     def getpacket(self, timeout=3, skipdollar=False):
         """Return the first correctly received packet from GDB target"""
 
+        old_timeout = self.sock.gettimeout()
+        self.sock.settimeout(timeout)
+        try:
+            return self.getpacket_(timeout, skipdollar)
+        finally:
+            self.sock.settimeout(old_timeout)
+
+    def getpacket_(self, timeout, skipdollar):
         t0 = time.time()
         while True:
             while True and not skipdollar:
@@ -183,7 +197,7 @@ class Target(FlashMemory):
                 if c == b'$':
                     break
                 if time.time() - t0 >  timeout:
-                    raise GetPacketTimoutException()
+                    raise GetPacketTimeoutException()
 
             csum = 0
             packet = [] # list-of-small-int
