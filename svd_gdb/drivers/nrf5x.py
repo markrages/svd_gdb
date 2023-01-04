@@ -11,11 +11,11 @@ class NRF5xPin(base.Pin):
         else:
             port = 0
             self.port = parent.P0
-        self.pinnummber = pinnumber
+        self.pinnumber = pinnumber
         self.pin = pinnumber & 31 # pin within port
         self.pinmask = 1<<self.pin
 
-        self.name = "P%d_%d"%(port, self.pin)
+        self.name = "P%d_%02d"%(port, self.pin)
 
     @property
     def i(self):
@@ -77,7 +77,6 @@ class NRF5x(svd_gdb.Device):
         ]
 
     def _add_pins(self, pins=32):
-
         for pin_number in range(pins):
             pin = NRF5xPin(self, pin_number)
             setattr(self, pin.name, pin)
@@ -115,6 +114,13 @@ class NRF52(NRF5x):
         self._gdb.make_stub.defines += ['NRF52']
 
         self._add_pins(32)
+
+class NRF52840(NRF52):
+    svd_name = 'nrf52840.svd'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._add_pins(32 + 16)
 
 if __name__=="__main__":
     pass

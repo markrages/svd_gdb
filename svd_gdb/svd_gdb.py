@@ -601,10 +601,20 @@ class GdbInterface(DebugInterface):
             print("Read from",repr(address),"= %08x"%val)
         return val
 
+    def read_mem(self, address, length):
+        if self.verbose:
+            print("Reading",length,"bytes from",repr(address))
+        return self.gdb.read_mem(address, length)
+
     def write32(self, address, val):
         if self.verbose:
             print("Write %08x"%val,"to",repr(address))
         return self.gdb.write32(address, val)
+
+    def write_mem(self, addr, data):
+        if self.verbose:
+            print("Writing",len(data),"bytes at",repr(address))
+        return self.gdb_write(address, data)
 
     @property
     def target_name(self):
@@ -653,13 +663,14 @@ class Device():
 
 #d = Device('nrf52.svd')
 
-import sys
-for arg in sys.argv[1:]:
-    d = Device(arg)
+if __name__=="__main__":
+    import sys
+    for arg in sys.argv[1:]:
+        d = Device(arg)
 
-    try:
-        print(repr(d.TIM1)+'.OR at', d.TIM1.OR._address)
-    except AttributeError:
-        pass
+        try:
+            print(repr(d.TIM1)+'.OR at', d.TIM1.OR._address)
+        except AttributeError:
+            pass
 
-    #del d
+        #del d
