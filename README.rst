@@ -76,7 +76,8 @@ What is a Python library like this useful for?
    take readings from sensors on the board under test, and store
    calibration parameters.
 
-   For alternative approaches to production testing, see Appendix A.
+   For comparison to alternative approaches to production testing, see
+   `Appendix A <other_approaches.rst>`_.
 
  - Development
 
