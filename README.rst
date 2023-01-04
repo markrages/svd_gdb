@@ -113,3 +113,9 @@ microcontroller functionality.  This is what SVD was invented to do.
 This package uses the `cmsis_svd
 <https://github.com/posborne/cmsis-svd>`_ Python package to provide a
 collection of SVD files.  But it uses its own parser.
+
+Other projects
+==============
+
+To use SVD files for more convenient debugging within the gdb's shell, see 
+https://github.com/bnahill/PyCortexMDebug
