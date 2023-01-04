@@ -114,6 +114,21 @@ This package uses the `cmsis_svd
 <https://github.com/posborne/cmsis-svd>`_ Python package to provide a
 collection of SVD files.  But it uses its own parser.
 
+Building and Installation
+=========================
+
+I build a package with this command::
+
+ python3 -m build
+
+Then install with::
+
+ python3 -m pip install dist/svd_gdb-0.0.4-py3-none-any.whl
+
+The `pypi version <https://pypi.org/project/svd_gdb/>`_ is stuck at
+0.0.3 until https://github.com/posborne/cmsis-svd/issues/164 is
+resolved.
+ 
 Other projects
 ==============
 
