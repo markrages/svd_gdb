@@ -390,6 +390,7 @@ def regs_and_clusters(self, svd):
         for cc in make_cluster(c, self):
             self._clusters.append(cc)
             setattr(self, cc._name, cc)
+            cc._freezeattr = True
 
 class Cluster(SvdObj, RegHaver):
     _intfields = (('_address_offset','addressOffset'),)
