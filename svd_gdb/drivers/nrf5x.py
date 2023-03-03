@@ -3,6 +3,8 @@
 from . import base
 from .. import svd_gdb
 
+import struct
+
 class NRF5xPin(base.Pin):
     def __init__(self, parent, pinnumber):
         if pinnumber > 31:
@@ -14,7 +16,8 @@ class NRF5xPin(base.Pin):
         self.pinnumber = pinnumber
         self.pin = pinnumber & 31 # pin within port
         self.pinmask = 1<<self.pin
-
+        self.parent = parent
+        
         self.name = "P%d_%02d"%(port, self.pin)
 
     @property
@@ -50,6 +53,13 @@ class NRF5xPin(base.Pin):
                                             'l': 1,
                                             'h': 3}[v]
 
+    @property
+    def v(self):
+        if self.pinnumber in self.parent._analog_pin_map:
+            return self.parent._read_adc(self.pinnumber)
+        else:
+            return NotImplemented
+            
     def __repr__(self):
         return self.name
 
@@ -115,6 +125,63 @@ class NRF52(NRF5x):
 
         self._add_pins(32)
 
+    _analog_pin_map = {None:None,
+                       2:0,
+                       3:1,
+                       4:2,
+                       5:3,
+                       28:4,
+                       29:5,
+                       30:6,
+                       31:7}
+
+    def _read_adc(self, pin):
+        return self._read_saadc_se(pin)
+    
+    def _read_saadc_se(self, pin=None, setup=True):        
+        """pin is the P0.xx number, not the ain number. 
+        scribbles over start of RAM. 
+        
+        returns reading in V, floating-point
+        """
+
+        ain = self._analog_pin_map[pin]
+
+        RESULT_ADDRESS = 0x20000000
+        if setup:            
+            self.SAADC.RESOLUTION = 2 # 12 bits
+            self.SAADC.OVERSAMPLE = 0 # disabled
+            self.SAADC.ENABLE = 1
+
+            self.SAADC.CH[0].CONFIG = 0x00020000 # 10us, single-ended, no resistor, internal ref
+            self.SAADC.CH[0].PSELN = 0 # not connected
+            if ain is None:
+                self.SAADC.CH[0].PSELP = 9
+            else:
+                self.SAADC.CH[0].PSELP = ain + 1
+
+            self._gdb.write32(RESULT_ADDRESS, 0)
+            self.SAADC.RESULT.PTR = RESULT_ADDRESS
+            self.SAADC.RESULT.MAXCNT = 1
+            self.SAADC.EVENTS_CALIBRATEDONE = 0
+            self.SAADC.TASKS_CALIBRATEOFFSET = 1
+
+            while not self.SAADC.EVENTS_CALIBRATEDONE:
+                pass
+
+        self.SAADC.EVENTS_END = 0
+        self.SAADC.TASKS_START = 1
+        self.SAADC.TASKS_SAMPLE = 1
+        while not self.SAADC.EVENTS_END:
+            pass
+
+        value, = struct.unpack('<h', self._gdb.read_mem(RESULT_ADDRESS, 2))
+        ref = 0.6
+        gain = 1/6
+        res = 1<<12
+        
+        return value * ref / (gain * res)
+        
 class NRF52840(NRF52):
     svd_name = 'nrf52840.svd'
 
