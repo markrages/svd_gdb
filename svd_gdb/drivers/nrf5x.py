@@ -17,7 +17,7 @@ class NRF5xPin(base.Pin):
         self.pin = pinnumber & 31 # pin within port
         self.pinmask = 1<<self.pin
         self.parent = parent
-        
+
         self.name = "P%d_%02d"%(port, self.pin)
 
     @property
@@ -59,7 +59,7 @@ class NRF5xPin(base.Pin):
             return self.parent._read_adc(self.pinnumber)
         else:
             return NotImplemented
-            
+
     def __repr__(self):
         return self.name
 
@@ -137,18 +137,18 @@ class NRF52(NRF5x):
 
     def _read_adc(self, pin):
         return self._read_saadc_se(pin)
-    
-    def _read_saadc_se(self, pin=None, setup=True):        
-        """pin is the P0.xx number, not the ain number. 
-        scribbles over start of RAM. 
-        
+
+    def _read_saadc_se(self, pin=None, setup=True):
+        """pin is the P0.xx number, not the ain number.
+        scribbles over start of RAM.
+
         returns reading in V, floating-point
         """
 
         ain = self._analog_pin_map[pin]
 
         RESULT_ADDRESS = 0x20000000
-        if setup:            
+        if setup:
             self.SAADC.RESOLUTION = 2 # 12 bits
             self.SAADC.OVERSAMPLE = 0 # disabled
             self.SAADC.ENABLE = 1
@@ -179,15 +179,88 @@ class NRF52(NRF5x):
         ref = 0.6
         gain = 1/6
         res = 1<<12
-        
+
         return value * ref / (gain * res)
-        
+
 class NRF52840(NRF52):
     svd_name = 'nrf52840.svd'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._add_pins(32 + 16)
+
+class NRF52820(NRF52):
+
+    svd_name = 'nrf52820.svd'
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._add_pins(32)
+
+    _analog_pin_map = {None:None,
+                       2:0,
+                       3:1,
+                       4:2,
+                       5:3}
+
+    def _read_adc(self, pin):
+        "Reads volts in 0..2.4 V"
+        counts = self._read_comp_se(pin, ref=2)
+        return (counts + 0.5) * 2.4 / 64
+
+    def _read_comp_se(self, pin=7, ref=0):
+        """Uses the comparator and reference divider as a 6-bit SAR ADC.
+
+        In the block diagram in
+        https://en.wikipedia.org/wiki/Successive-approximation_ADC,
+        the "DAC" and "Comparator" blocks are supplied by hardware,
+        and this function supplies the "SAR" block.
+
+        pin 7 is VDDH/5
+        ref = 0 for 1.2v, 1 for 1.8, 2 for 2.4
+
+        """
+
+        c = self.COMP
+
+        # start init
+
+        c.REFSEL = ref
+
+        c.MODE.MAIN = 0
+        c.MODE.SP = 1 # 1=normal, 2=fast
+        c.HYST = 0
+
+        c.SHORTS = 0
+        c.INTEN = 0
+        c.PSEL = pin
+
+        c.ENABLE = 2
+
+        # end of init
+
+        bit = 32
+        c.TH = 0
+        while bit:
+
+            c.TASKS_STOP = 1
+            last_th = int(c.TH)
+
+            mask = 0x101 * bit
+            c.TH = last_th | mask
+
+            c.EVENTS_READY = 0
+            c.TASKS_START = 1
+            while c.EVENTS_READY == 0:
+                pass
+            c.TASKS_SAMPLE = 1
+
+            if not c.RESULT:
+                c.TH = last_th
+
+            bit >>= 1
+
+        return c.TH & 63
+
 
 if __name__=="__main__":
     pass
