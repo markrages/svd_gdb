@@ -1,0 +1,3 @@
+[submodule "svd_gdb/cmsis-svd-data"]
+	path = svd_gdb/cmsis-svd-data
+	url = https://github.com/cmsis-svd/cmsis-svd-data
