@@ -102,33 +102,17 @@ What is a Python library like this useful for?
 Implementation
 ==============
 
-This script uses gdb.py from the Black Magic Probe project, and
+This script uses ``gdb.py`` from the Black Magic Probe project, and
 extends it with register definitions from the
 `SVD <http://www.keil.com/pack/doc/CMSIS/SVD/html/>`_ ("system view
 description") file provided by the microcontroller's vendor.
 
 It is no accident that the SVD file happens to contain exactly the
 correct information to make an ergonomic Python interface to the
-microcontroller functionality.  This is what SVD was invented to do.
+microcontroller functionality.  This kind of thing is what SVD was
+invented to do.
 
-This package uses the `cmsis_svd
-<https://github.com/posborne/cmsis-svd>`_ Python package to provide a
-collection of SVD files.  But it uses its own parser.
-
-Building and Installation
-=========================
-
-I build a package with this command::
-
- python3 -m build
-
-Then install with::
-
- python3 -m pip install dist/svd_gdb-0.0.4-py3-none-any.whl
-
-The `pypi version <https://pypi.org/project/svd_gdb/>`_ is stuck at
-0.0.3 until https://github.com/posborne/cmsis-svd/issues/164 is
-resolved.
+This package gets the SVD files on demand from the `cmsis-svd <https://github.com/cmsis-svd/cmsis-svd-data>`_ project.  But it uses its own parser.
  
 Other projects
 ==============
