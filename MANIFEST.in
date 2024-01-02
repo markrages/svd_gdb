@@ -1,1 +1,3 @@
 include README.rst
+include other_approaches.rst
+include svd_gdb/github_dl/*txt
