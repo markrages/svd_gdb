@@ -20,7 +20,3 @@ with open('registry.txt', 'w') as of:
             revhash = subprocess.check_output('git rev-parse'.split() + [REV],
                                      text=True).strip()
             print(revhash, file=rhf)
-
-        
-    
-
