@@ -51,8 +51,7 @@ class Accel():
         """ Returns scaled acceleration, raw temperature """
         raise Exception('subclass me')
 
-def cmsis_svd_file(vendor, filename):
-    import cmsis_svd.parser
+from svd_gdb.github_dl import cached
 
-    rf = cmsis_svd.parser.pkg_resources.resource_filename
-    return rf("cmsis_svd", "/".join(['data',vendor,filename]))
+def cmsis_svd_file(vendor, filename):
+    return cached.fetch("/".join(['data',vendor,filename]))

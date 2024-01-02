@@ -1,6 +1,6 @@
 [project]
 name = "svd_gdb"
-version = "0.0.5"
+version = "0.0.6"
 authors = [
   { name="Mark Rages", email="markrages@gmail.com" },
 ]
@@ -16,7 +16,7 @@ classifiers = [
 
 dependencies = [
     "pySerial",
-    "cmsis_svd @ git+https://github.com/posborne/cmsis-svd@9c416c5ff18e7d272a792c13bd235ebe30eef816#subdirectory=python",
+	"pooch"
 ]
 
 
