@@ -45,30 +45,30 @@ Appendix A. Alternative approaches to production board testing
 
    1. The protocol must be designed and debugged, at some cost of
       time and attention.
-
+   
    2. The testing is tightly coupled to the firmware and is less
       cohesive.  Making an unforeseen change to the testing scheme
       will usually require releasing new firmware as well as updating
       the test scripts, and the two must be kept synchronized to have
       a legible system.
-
+   
    3. Because of the friction of #2, not every test that might be
 	  useful will be run.
-
+   
    4. Because of #2, development of testing scripts is blocked on
       development of firmware.
-
+   
    5. An additional connection to the target is required, beyond the
       SWD connection already required for firmware loading.
-
+   
    6. Code space is occupied by routines that are only used during
       production.  I have seen microcontroller programs where half the
       flash space is occupied by implementations of ``printf()``,
       ``strtok()``, and the like.  Not only does this reduce space for
       useful code, it prevents use of smaller and cheaper processors.
-
+   
 	 .. note:: When your embedded flash image contains ANSI color escape codes, the firmware may not be optimized for code size.
-
+   
    7. The debug shell and debug modes are aberrant modes, states where
       the firmware is not executing its intended function.  For
       reliability and security, we should remove such states from
