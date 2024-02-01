@@ -1,6 +1,6 @@
 [project]
 name = "svd_gdb"
-version = "0.0.6"
+version = "0.0.7"
 authors = [
   { name="Mark Rages", email="markrages@gmail.com" },
 ]
@@ -16,7 +16,7 @@ classifiers = [
 
 dependencies = [
     "pySerial",
-	"pooch"
+    "pooch"
 ]
 
 
@@ -27,5 +27,3 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-

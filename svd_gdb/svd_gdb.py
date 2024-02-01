@@ -580,7 +580,7 @@ def get_first_swd():
     s=serial.Serial('/dev/ttyBmpGdb',timeout=0.3)
     target = gdb.Target(s)
 
-    target.monitor('swdp_scan')
+    target.monitor('swd')
     target.attach(1)
     return target
 

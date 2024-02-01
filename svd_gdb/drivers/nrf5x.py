@@ -182,12 +182,20 @@ class NRF52(NRF5x):
 
         return value * ref / (gain * res)
 
+class NRF51822(NRF51):
+    pass
+    
 class NRF52840(NRF52):
     svd_name = 'nrf52840.svd'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._add_pins(32 + 16)
+
+class NRF52832(NRF52): pass
+
+class NRF52833(NRF52):
+    svd_name = 'nrf52833.svd'
 
 class NRF52820(NRF52):
 
@@ -242,16 +250,16 @@ class NRF52820(NRF52):
         c.TH = 0
         while bit:
 
-            c.TASKS_STOP = 1
+            #c.TASKS_STOP = 1
             last_th = int(c.TH)
 
             mask = 0x101 * bit
             c.TH = last_th | mask
 
-            c.EVENTS_READY = 0
-            c.TASKS_START = 1
-            while c.EVENTS_READY == 0:
-                pass
+            #c.EVENTS_READY = 0
+            #c.TASKS_START = 1
+            #while c.EVENTS_READY == 0:
+            #    pass
             c.TASKS_SAMPLE = 1
 
             if not c.RESULT:
