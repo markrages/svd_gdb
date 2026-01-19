@@ -6,13 +6,10 @@ from .. import svd_gdb
 import struct
 
 class NRF5xPin(base.Pin):
-    def __init__(self, parent, pinnumber):
-        if pinnumber > 31:
-            port = 1
-            self.port = parent.P1
-        else:
-            port = 0
-            self.port = parent.P0
+    def __init__(self, parent, pinnumber, ports):
+        port = pinnumber // 32
+        self.port = ports[port]
+
         self.pinnumber = pinnumber
         self.pin = pinnumber & 31 # pin within port
         self.pinmask = 1<<self.pin
@@ -86,9 +83,9 @@ class NRF5x(svd_gdb.Device):
             self.sdk+'/components/toolchain/cmsis/include'
         ]
 
-    def _add_pins(self, pins=32):
+    def _add_pins(self, pins=32, ports=[]):
         for pin_number in range(pins):
-            pin = NRF5xPin(self, pin_number)
+            pin = NRF5xPin(self, pin_number, ports)
             setattr(self, pin.name, pin)
             self._pins.append(pin)
 
@@ -107,7 +104,7 @@ class NRF51(NRF5x):
         self._gdb.make_stub.defines += ['NRF51']
 
         self.P0 = self.GPIO # compatibility name
-        self._add_pins(32)
+        self._add_pins(32, [self.P0])
 
 class NRF52(NRF5x):
     svd_name = 'nrf52.svd'
@@ -123,7 +120,7 @@ class NRF52(NRF5x):
         self._gdb.make_stub.includes += ['<nrf52.h>', '<nrf52_bitfields.h>']
         self._gdb.make_stub.defines += ['NRF52']
 
-        self._add_pins(32)
+        self._add_pins(32, [self.P0])
 
     _analog_pin_map = {None:None,
                        2:0,
@@ -184,13 +181,13 @@ class NRF52(NRF5x):
 
 class NRF51822(NRF51):
     pass
-    
+
 class NRF52840(NRF52):
     svd_name = 'nrf52840.svd'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._add_pins(32 + 16)
+        self._add_pins(32 + 16, [self.P0, self.P1])
 
 class NRF52832(NRF52): pass
 
@@ -202,7 +199,7 @@ class NRF52820(NRF52):
     svd_name = 'nrf52820.svd'
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._add_pins(32)
+        self._add_pins(32, [self.P0])
 
     _analog_pin_map = {None:None,
                        2:0,
@@ -268,6 +265,41 @@ class NRF52820(NRF52):
             bit >>= 1
 
         return c.TH & 63
+
+import re
+
+class NRF54(NRF5x):
+    svd_name = 'nrf54l15_application.svd'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert 'nRF54' in self._gdb.target_name
+
+        ns_re = re.compile('GLOBAL_(.*)_NS')
+        s_re = re.compile('GLOBAL_(.*)_S')
+
+        # First collect all insecure peripherals
+        for att in dir(self):
+            m = ns_re.match(att)
+            if m:
+                setattr(self, m.group(1), getattr(self, att))
+
+        # Override the insecure with secure addresses
+        for att in dir(self):
+            m = s_re.match(att)
+            if m:
+                setattr(self, m.group(1), getattr(self, att))
+
+        self._gdb.make_stub.include_path = [
+            self.sdk+'/modules/nrfx/templates/nrf54/'
+        ] + self._gdb.make_stub.include_path
+
+        self._gdb.make_stub.includes += ['<nrf54.h>', '<nrf54_bitfields.h>']
+        self._gdb.make_stub.defines += ['NRF54']
+
+        self._add_pins(32+32+32, [self.P0,
+                                  self.P1,
+                                  self.P2])
 
 
 if __name__=="__main__":

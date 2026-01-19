@@ -1,6 +1,6 @@
 [project]
 name = "svd_gdb"
-version = "0.0.7"
+version = "0.0.8"
 authors = [
   { name="Mark Rages", email="markrages@gmail.com" },
 ]

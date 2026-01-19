@@ -7,7 +7,7 @@ install_dir = os.path.dirname(__file__)
 
 version=open(install_dir+"/revhash.txt").read().strip()
 
-__pw = github_dl.PoochWrap('cmsis-svd', 'cmsis-svd-data',
+__pw = github_dl.PoochWrap('markrages', 'cmsis-svd-data',
                            version,
                            install_dir+"/registry.txt")
 

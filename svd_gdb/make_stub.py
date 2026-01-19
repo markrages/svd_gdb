@@ -61,10 +61,34 @@ class MakeStub():
         self.sources=[]
 
         cpu = device_svd._cpu
+
+        # arm-none-eabi-gcc: note: valid arguments are: arm8 arm810
+        # strongarm strongarm110 fa526 fa626 arm7tdmi arm7tdmi-s
+        # arm710t arm720t arm740t arm9 arm9tdmi arm920t arm920 arm922t
+        # arm940t ep9312 arm10tdmi arm1020t arm9e arm946e-s arm966e-s
+        # arm968e-s arm10e arm1020e arm1022e xscale iwmmxt iwmmxt2
+        # fa606te fa626te fmp626 fa726te arm926ej-s arm1026ej-s
+        # arm1136j-s arm1136jf-s arm1176jz-s arm1176jzf-s mpcorenovfp
+        # mpcore arm1156t2-s arm1156t2f-s cortex-m1 cortex-m0
+        # cortex-m0plus cortex-m1.small-multiply
+        # cortex-m0.small-multiply cortex-m0plus.small-multiply
+        # generic-armv7-a cortex-a5 cortex-a7 cortex-a8 cortex-a9
+        # cortex-a12 cortex-a15 cortex-a17 cortex-r4 cortex-r4f
+        # cortex-r5 cortex-r7 cortex-r8 cortex-m7 cortex-m4 cortex-m3
+        # marvell-pj4 cortex-a15.cortex-a7 cortex-a17.cortex-a7
+        # cortex-a32 cortex-a35 cortex-a53 cortex-a57 cortex-a72
+        # cortex-a73 exynos-m1 xgene1 cortex-a57.cortex-a53
+        # cortex-a72.cortex-a53 cortex-a73.cortex-a35
+        # cortex-a73.cortex-a53 cortex-a55 cortex-a75 cortex-a76
+        # cortex-a76ae cortex-a77 neoverse-n1 cortex-a75.cortex-a55
+        # cortex-a76.cortex-a55 neoverse-v1 neoverse-n2 cortex-m23
+        # cortex-m33 cortex-m35p cortex-m55 cortex-r52
+        
         if cpu: # Not all SVD contain this information
             self.cflags.append({'CM0':'-mcpu=cortex-m0',
                                 'CM3':'-mcpu=cortex-m3',
-                                'CM4':'-mcpu=cortex-m4'}[cpu._name])
+                                'CM4':'-mcpu=cortex-m4',
+                                'CM33':'-mcpu-cortex-m33'}[cpu._name])
 
         self.function_addr = function_addr
         self.heap_addr = heap_addr
