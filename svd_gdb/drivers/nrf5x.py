@@ -60,7 +60,7 @@ class NRF5xPin(base.Pin):
     def __repr__(self):
         return self.name
 
-class NRF5x(svd_gdb.Device):
+class NRF5x(base.Device):
     sdk = "/opt/nRF5_SDK_15.3.0/"
     mfgr_name = 'Nordic'
     svd_name = '' # override me
@@ -267,6 +267,80 @@ class NRF52820(NRF52):
         return c.TH & 63
 
 import re
+import time
+
+class SPI_nRF_SPIM:
+    """SPI master interface using an nRF SPIM peripheral."""
+
+    SCRATCH_ADDR = 0x20000000
+
+    CORE_CLOCK = 128_000_000
+
+    def __init__(self, gdb, spim, sck, mosi, miso, csn=None,
+                 clock_frequency=None, cpol=0, cpha=0):
+        self._gdb = gdb
+        self.spim = spim
+        self.csn = csn
+
+        spim.ENABLE = 0
+        spim.PSEL.SCK = sck.pinnumber
+        spim.PSEL.MOSI = mosi.pinnumber
+        spim.PSEL.MISO = miso.pinnumber
+
+        if clock_frequency is not None:
+            spim.PRESCALER = self.CORE_CLOCK // clock_frequency
+
+        spim.CONFIG = (cpha << 1) | (cpol << 2)
+
+        self.CHUNK_SIZE = (1 << spim.DMA.TX.MAXCNT.MAXCNT._bit_width) - 1
+
+        if csn is not None:
+            csn.o = 1
+
+    def _xfer_chunk(self, tx_data, rx_len, timeout):
+        self._gdb.write_mem(self.SCRATCH_ADDR, tx_data)
+
+        self.spim.DMA.TX.PTR = self.SCRATCH_ADDR
+        self.spim.DMA.TX.MAXCNT = max(len(tx_data), rx_len)
+        self.spim.DMA.RX.PTR = self.SCRATCH_ADDR
+        self.spim.DMA.RX.MAXCNT = rx_len
+
+        self.spim.ENABLE = 7
+        self.spim.EVENTS_END = 0
+        self.spim.TASKS_START = 1
+
+        t0 = time.time()
+        while not self.spim.EVENTS_END:
+            if time.time() > t0 + timeout:
+                self.spim.TASKS_STOP = 1
+                raise TimeoutError("SPI transaction timed out")
+
+        self.spim.ENABLE = 0
+        return self._gdb.read_mem(self.SCRATCH_ADDR, rx_len)
+
+    def xfer(self, tx_data, rx_len=None, timeout=1):
+        """SPI transaction. Returns received bytes. Scribbles on start of RAM."""
+        if rx_len is None:
+            rx_len = len(tx_data)
+
+        if self.csn is not None:
+            self.csn.o = 0
+
+        total = max(len(tx_data), rx_len)
+        result = b''
+        offset = 0
+        while offset < total:
+            chunk = min(self.CHUNK_SIZE, total - offset)
+            tx_chunk = tx_data[offset:offset + chunk]
+            rx_chunk = min(chunk, max(0, rx_len - offset))
+            result += self._xfer_chunk(tx_chunk, rx_chunk, timeout)
+            offset += chunk
+
+        if self.csn is not None:
+            self.csn.o = 1
+
+        return result
+
 
 class NRF54(NRF5x):
     svd_name = 'nrf54l15_application.svd'
@@ -300,6 +374,12 @@ class NRF54(NRF5x):
         self._add_pins(32+32+32, [self.P0,
                                   self.P1,
                                   self.P2])
+
+    def spi(self, spim, sck, mosi, miso, csn=None,
+            clock_frequency=None, cpol=0, cpha=0):
+        """Return an SPI instance for the given SPIM peripheral and pins."""
+        return SPI_nRF_SPIM(self._gdb, spim, sck, mosi, miso, csn,
+                            clock_frequency, cpol, cpha)
 
 
 if __name__=="__main__":

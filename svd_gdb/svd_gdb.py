@@ -614,8 +614,8 @@ class GdbInterface(DebugInterface):
 
     def write_mem(self, addr, data):
         if self.verbose:
-            print("Writing",len(data),"bytes at",repr(address))
-        return self.gdb_write(address, data)
+            print("Writing",len(data),"bytes at",repr(addr))
+        return self.gdb.write_mem(addr, data)
 
     @property
     def target_name(self):
