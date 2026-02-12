@@ -361,8 +361,8 @@ class Target(FlashMemory):
             packlen = min(length,self.PacketSize//2)
             self.putpacket(b"m%08X,%08X" % (addr, packlen))
             reply = self.getpacket()
-            if (reply == b'') or (reply[:1] == b'E'):
-                raise Exception('Error reading memory at 0x%08X' % addr)
+            if (reply == b'') or (reply[:1] == b'E' and len(reply) == 3):
+                raise Exception('Error reading memory at 0x%08X : "%s"' % (addr, reply))
             try:
                 data = unhexify(reply)
             except Exception:
@@ -372,7 +372,7 @@ class Target(FlashMemory):
             addr += packlen
 
         return ret
-
+    
     def write_mem(self, addr, data):
         """Write data to target at address addr"""
         data = bytes(data)
