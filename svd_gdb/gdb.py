@@ -217,6 +217,12 @@ class Target(FlashMemory):
                     packet.append(c ^ 0x20)
                     continue
 
+                if c == ord('*'):
+                    repeat, = self.sock.recv(1)
+                    csum += c + repeat
+                    packet.extend([packet[-1]] * (repeat - 29))
+                    continue
+
                 packet.append(c)
                 csum += c
 
@@ -232,7 +238,7 @@ class Target(FlashMemory):
         out = []
 
         for c in packet:
-            if (c in b'$#}'):
+            if (c in b'$#}*'):
                 out.append(ord('}'))
                 out.append(c ^ 0x20)
             else:
@@ -337,7 +343,7 @@ class Target(FlashMemory):
         """Attach to target process (gdb "attach" command)"""
         self.putpacket(b"vAttach;%08X" % pid)
         reply = self.getpacket()
-        if (reply == b'') or (reply[:1] == b'E'):
+        if (reply == b'') or (reply[:1] == b'E' and len(reply) == 3):
             raise Exception('Failed to attach to remote pid %d' % pid)
         self.last_stub = None
 
@@ -407,12 +413,12 @@ class Target(FlashMemory):
         """Read target core registers"""
         self.putpacket(b"g")
         reply = self.getpacket()
-        if (reply == b'') or (reply[:1] == b'E'):
-            raise Exception('Error reading memory at 0x%08X' % addr)
+        if (reply == b'') or (reply[:1] == b'E' and len(reply) == 3):
+            raise Exception('Error reading registers')
         try:
             data = unhexify(reply)
         except Exception:
-            raise Exception('Invalid response to memory read packet: %r' % reply)
+            raise Exception('Invalid response to register read packet: %r' % reply)
         ret = array.array('I',data)
         return ret
 

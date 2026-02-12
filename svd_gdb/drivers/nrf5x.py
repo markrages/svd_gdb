@@ -272,6 +272,8 @@ import time
 class SPI_nRF_SPIM:
     """SPI master interface using an nRF SPIM peripheral."""
 
+    CHUNK_SIZE = 4096
+
     SCRATCH_ADDR = 0x20000000
 
     CORE_CLOCK = 128_000_000
@@ -292,16 +294,18 @@ class SPI_nRF_SPIM:
 
         spim.CONFIG = (cpha << 1) | (cpol << 2)
 
-        self.CHUNK_SIZE = (1 << spim.DMA.TX.MAXCNT.MAXCNT._bit_width) - 1
+        hw_limit = (1 << spim.DMA.TX.MAXCNT.MAXCNT._bit_width) - 1
+        self.CHUNK_SIZE = min(self.CHUNK_SIZE, hw_limit)
 
         if csn is not None:
             csn.o = 1
 
     def _xfer_chunk(self, tx_data, rx_len, timeout):
-        self._gdb.write_mem(self.SCRATCH_ADDR, tx_data)
+        if tx_data:
+            self._gdb.write_mem(self.SCRATCH_ADDR, tx_data)
 
         self.spim.DMA.TX.PTR = self.SCRATCH_ADDR
-        self.spim.DMA.TX.MAXCNT = max(len(tx_data), rx_len)
+        self.spim.DMA.TX.MAXCNT = len(tx_data)
         self.spim.DMA.RX.PTR = self.SCRATCH_ADDR
         self.spim.DMA.RX.MAXCNT = rx_len
 
