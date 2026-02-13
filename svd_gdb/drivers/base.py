@@ -110,6 +110,9 @@ class SPI_bitbang:
 from .. import svd_gdb
 
 class Device(svd_gdb.Device):
+    def read_mem(self, addr, size):
+        return self._gdb.read_mem(addr, size)
+
     def spi(self, sck, mosi, miso, csn=None, cpol=0, cpha=0):
         """Return a bitbanged SPI instance for the given pins."""
         return SPI_bitbang(sck, mosi, miso, csn, cpol, cpha)
