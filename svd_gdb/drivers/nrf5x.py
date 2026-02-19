@@ -89,6 +89,10 @@ class NRF5x(base.Device):
             setattr(self, pin.name, pin)
             self._pins.append(pin)
 
+    @property
+    def vdd(self):
+        return self._read_adc(None)
+
 class NRF51(NRF5x):
     svd_name = 'nrf51.svd'
 
@@ -378,6 +382,69 @@ class NRF54(NRF5x):
         self._add_pins(32+32+32, [self.P0,
                                   self.P1,
                                   self.P2])
+
+    # AIN pin mapping for nRF54L15 (QFN48)
+    # All AIN pins are on Port 1
+    _analog_pin_map = {None: None,  # VDD
+                       36: 0,   # P1.04 -> AIN0
+                       37: 1,   # P1.05 -> AIN1
+                       38: 2,   # P1.06 -> AIN2
+                       39: 3,   # P1.07 -> AIN3
+                       43: 4,   # P1.11 -> AIN4
+                       44: 5,   # P1.12 -> AIN5
+                       45: 6,   # P1.13 -> AIN6
+                       46: 7}   # P1.14 -> AIN7
+
+    def _read_adc(self, pin):
+        return self._read_saadc_se(pin)
+
+    def _read_saadc_se(self, pin=None, setup=True):
+        """pin is the Px.yy number (e.g. 36 for P1.04), not the AIN number.
+        scribbles over start of RAM.
+
+        returns reading in V, floating-point
+        """
+
+        RESULT_ADDRESS = 0x20000000
+        if setup:
+            self.SAADC.RESOLUTION = 2 # 12 bits
+            self.SAADC.OVERSAMPLE = 0 # disabled
+            self.SAADC.ENABLE = 1
+
+            # GAIN=2/8(7), REFSEL=0(internal 0.9V), MODE=0(SE),
+            # TACQ=79 -> (79+1)*125ns = 10us
+            self.SAADC.CH[0].CONFIG = (79 << 16) | (7 << 8)
+            self.SAADC.CH[0].PSELN = 0 # not connected
+            if pin is None:
+                # VDD: CONNECT=Internal(2), INTERNAL=Vdd(2)
+                self.SAADC.CH[0].PSELP = (2 << 30) | (2 << 12)
+            else:
+                port = pin // 32
+                p = pin & 31
+                # CONNECT=AnalogInput(1), PORT, PIN
+                self.SAADC.CH[0].PSELP = (1 << 30) | (port << 8) | p
+
+            self._gdb.write32(RESULT_ADDRESS, 0)
+            self.SAADC.RESULT.PTR = RESULT_ADDRESS
+            self.SAADC.RESULT.MAXCNT = 2 # bytes (1 sample = 2 bytes)
+            self.SAADC.EVENTS_CALIBRATEDONE = 0
+            self.SAADC.TASKS_CALIBRATEOFFSET = 1
+
+            while not self.SAADC.EVENTS_CALIBRATEDONE:
+                pass
+
+        self.SAADC.EVENTS_END = 0
+        self.SAADC.TASKS_START = 1
+        self.SAADC.TASKS_SAMPLE = 1
+        while not self.SAADC.EVENTS_END:
+            pass
+
+        value, = struct.unpack('<h', self._gdb.read_mem(RESULT_ADDRESS, 2))
+        ref = 0.9
+        gain = 2/8
+        res = 1<<12
+
+        return value * ref / (gain * res)
 
     def spi(self, spim, sck, mosi, miso, csn=None,
             clock_frequency=None, cpol=0, cpha=0):
