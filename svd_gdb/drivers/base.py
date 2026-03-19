@@ -107,6 +107,130 @@ class SPI_bitbang:
         return bytes(result[:rx_len])
 
 
+class I2C_bitbang:
+    """Bitbanged I2C master using GPIO pins.
+
+    Pins must support .o (output setter), .i (input getter), and .oe
+    (output enable) attributes.
+    """
+
+    def __init__(self, scl, sda, delay=0.001):
+        self.scl = scl
+        self.sda = sda
+        self.delay = delay
+        # Start with bus idle: both lines high
+        self.scl.o = 1
+        self.sda.o = 1
+        self.scl.oe = 1
+        self.sda.oe = 1
+
+    def _scl_high(self):
+        self.scl.o = 1
+        import time; time.sleep(self.delay)
+
+    def _scl_low(self):
+        self.scl.o = 0
+        import time; time.sleep(self.delay)
+
+    def _sda_high(self):
+        self.sda.o = 1
+
+    def _sda_low(self):
+        self.sda.o = 0
+
+    def _sda_read(self):
+        return self.sda.i
+
+    def _start(self):
+        self._sda_high()
+        self._scl_high()
+        self._sda_low()
+        import time; time.sleep(self.delay)
+        self._scl_low()
+
+    def _stop(self):
+        self._sda_low()
+        self._scl_high()
+        self._sda_high()
+        import time; time.sleep(self.delay)
+
+    def _write_byte(self, byte):
+        for bit in range(8):
+            if byte & (0x80 >> bit):
+                self._sda_high()
+            else:
+                self._sda_low()
+            self._scl_high()
+            self._scl_low()
+        # Read ACK
+        self._sda_high()
+        self._scl_high()
+        ack = not self._sda_read()
+        self._scl_low()
+        return ack
+
+    def _read_byte(self, ack):
+        self._sda_high()
+        val = 0
+        for _ in range(8):
+            self._scl_high()
+            val = (val << 1) | self._sda_read()
+            self._scl_low()
+        if ack:
+            self._sda_low()
+        else:
+            self._sda_high()
+        self._scl_high()
+        self._scl_low()
+        self._sda_high()
+        return val
+
+    def write(self, addr, data):
+        """Write data bytes to 7-bit I2C address. Returns True on ACK."""
+        self._start()
+        if not self._write_byte(addr << 1):
+            self._stop()
+            return False
+        for b in data:
+            if not self._write_byte(b):
+                self._stop()
+                return False
+        self._stop()
+        return True
+
+    def read(self, addr, count):
+        """Read count bytes from 7-bit I2C address. Returns bytes or None on NACK."""
+        self._start()
+        if not self._write_byte((addr << 1) | 1):
+            self._stop()
+            return None
+        result = []
+        for i in range(count):
+            result.append(self._read_byte(ack=(i < count - 1)))
+        self._stop()
+        return bytes(result)
+
+    def write_read(self, addr, data, count):
+        """Write then repeated-start read."""
+        self._start()
+        if not self._write_byte(addr << 1):
+            self._stop()
+            return None
+        for b in data:
+            if not self._write_byte(b):
+                self._stop()
+                return None
+        self._start()
+        if not self._write_byte((addr << 1) | 1):
+            self._stop()
+            return None
+        result = []
+        for i in range(count):
+            result.append(self._read_byte(ack=(i < count - 1)))
+        self._stop()
+        return bytes(result)
+
+
 from .. import svd_gdb
 
 class Device(svd_gdb.Device):
