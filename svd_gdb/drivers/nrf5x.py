@@ -183,6 +183,16 @@ class NRF52(NRF5x):
 
         return value * ref / (gain * res)
 
+    def spi(self, spim, sck, mosi, miso, csn=None,
+            clock_frequency=None, cpol=0, cpha=0):
+        """Return a hardware SPI instance for the given SPIM peripheral."""
+        return SPI_nRF52_SPIM(self._gdb, spim, sck, mosi, miso, csn,
+                              clock_frequency, cpol, cpha)
+
+    def i2c(self, twim, scl, sda, frequency=None):
+        """Return a hardware I2C instance for the given TWIM peripheral."""
+        return I2C_nRF52_TWIM(self._gdb, twim, scl, sda, frequency)
+
 class NRF51822(NRF51):
     pass
 
@@ -272,6 +282,303 @@ class NRF52820(NRF52):
 
 import re
 import time
+
+class SPI_nRF52_SPIM:
+    """SPI master using nRF52 SPIM peripheral (EasyDMA).
+
+    nRF52840 SPIM register layout:
+        TASKS_START     0x010       EVENTS_END      0x118
+        TASKS_STOP      0x014       EVENTS_STARTED  0x14C
+        ENABLE          0x500 (7=enable, 0=disable)
+        PSEL.SCK        0x508       PSEL.MOSI       0x50C
+        PSEL.MISO       0x510       PSEL.CSN        0x514
+        FREQUENCY       0x524 (enumerated)
+        RXD.PTR         0x534       RXD.MAXCNT      0x538
+        TXD.PTR         0x544       TXD.MAXCNT      0x548
+        CONFIG          0x554       ORC             0x5C0
+    """
+
+    SCRATCH_ADDR = 0x20000000
+    CHUNK_SIZE = 255  # MAXCNT is 8-bit on SPIM0-2, 16-bit on SPIM3
+
+    # FREQUENCY register values
+    FREQ_MAP = {
+        125000:   0x02000000,
+        250000:   0x04000000,
+        500000:   0x08000000,
+        1000000:  0x10000000,
+        2000000:  0x20000000,
+        4000000:  0x40000000,
+        8000000:  0x80000000,
+    }
+
+    def __init__(self, gdb, spim, sck, mosi, miso, csn=None,
+                 clock_frequency=None, cpol=0, cpha=0):
+        self._gdb = gdb
+        self.spim = spim
+        self.csn = csn
+        self.sck = sck
+        self.mosi = mosi
+        self.miso = miso
+
+        spim.ENABLE = 0
+        spim.PSEL.SCK = sck.pinnumber
+        spim.PSEL.MOSI = mosi.pinnumber
+        spim.PSEL.MISO = miso.pinnumber
+
+        if clock_frequency is not None:
+            # Find closest supported frequency
+            best = min(self.FREQ_MAP.keys(),
+                       key=lambda f: abs(f - clock_frequency))
+            spim.FREQUENCY = self.FREQ_MAP[best]
+        else:
+            spim.FREQUENCY = self.FREQ_MAP[4000000]  # 4 MHz default
+
+        spim.CONFIG = (cpha << 1) | (cpol << 2)
+
+        # SPIM3 supports 16-bit MAXCNT (up to 65535)
+        # SPIM0-2 support 8-bit MAXCNT (up to 255)
+        # Detect from SVD field width if available
+        try:
+            hw_limit = (1 << spim.TXD.MAXCNT.MAXCNT._bit_width) - 1
+            self.CHUNK_SIZE = min(4096, hw_limit)
+        except (AttributeError, TypeError):
+            pass  # keep default 255
+
+        self.init()
+
+    def init(self):
+        if self.csn is not None:
+            self.csn.o = 1
+
+    def uninit(self):
+        if self.csn is not None:
+            self.csn.o = 0
+        self.sck.i
+        self.mosi.i
+        self.miso.i
+
+    def _xfer_chunk(self, tx_data, rx_len, timeout):
+        if tx_data:
+            self._gdb.write_mem(self.SCRATCH_ADDR, tx_data)
+
+        self.spim.TXD.PTR = self.SCRATCH_ADDR
+        self.spim.TXD.MAXCNT = len(tx_data)
+        self.spim.RXD.PTR = self.SCRATCH_ADDR
+        self.spim.RXD.MAXCNT = rx_len
+
+        self.spim.ENABLE = 7
+        self.spim.EVENTS_END = 0
+        self.spim.TASKS_START = 1
+
+        t0 = time.time()
+        while not self.spim.EVENTS_END:
+            if time.time() > t0 + timeout:
+                self.spim.TASKS_STOP = 1
+                raise TimeoutError("SPI transaction timed out")
+
+        self.spim.ENABLE = 0
+        return self._gdb.read_mem(self.SCRATCH_ADDR, rx_len)
+
+    def xfer(self, tx_data, rx_len=None, timeout=1):
+        """SPI transaction. Returns received bytes."""
+        if rx_len is None:
+            rx_len = len(tx_data)
+
+        if self.csn is not None:
+            self.csn.o = 0
+
+        total = max(len(tx_data), rx_len)
+        result = b''
+        offset = 0
+        while offset < total:
+            chunk = min(self.CHUNK_SIZE, total - offset)
+            tx_chunk = tx_data[offset:offset + chunk]
+            rx_chunk = min(chunk, max(0, rx_len - offset))
+            result += self._xfer_chunk(tx_chunk, rx_chunk, timeout)
+            offset += chunk
+
+        if self.csn is not None:
+            self.csn.o = 1
+
+        return result
+
+
+class I2C_nRF52_TWIM:
+    """I2C master using nRF52 TWIM peripheral (EasyDMA).
+
+    nRF52840 TWIM register layout:
+        TASKS_STARTRX   0x000       EVENTS_STOPPED  0x104
+        TASKS_STARTTX   0x008       EVENTS_ERROR    0x124
+        TASKS_STOP      0x014       EVENTS_RXSTARTED 0x14C
+        TASKS_SUSPEND   0x01C       EVENTS_TXSTARTED 0x150
+        TASKS_RESUME    0x020       EVENTS_LASTRX   0x15C
+                                    EVENTS_LASTTX   0x160
+        SHORTS          0x200
+        ERRORSRC        0x4C4
+        ENABLE          0x500 (6=enable, 0=disable)
+        FREQUENCY       0x524
+        ADDRESS         0x588
+        RXD.PTR         0x534       RXD.MAXCNT      0x538
+        TXD.PTR         0x544       TXD.MAXCNT      0x548
+    """
+
+    SCRATCH_ADDR = 0x20000000  # TX buffer
+    SCRATCH_RX   = 0x20000100  # RX buffer
+
+    FREQ_100K  = 0x01980000
+    FREQ_250K  = 0x04000000
+    FREQ_400K  = 0x06400000
+
+    def __init__(self, gdb, twim, scl, sda, frequency=None):
+        self._gdb = gdb
+        self.twim = twim
+
+        twim.ENABLE = 0
+        twim.PSEL.SCL = scl.pinnumber
+        twim.PSEL.SDA = sda.pinnumber
+
+        if frequency is None:
+            twim.FREQUENCY = self.FREQ_100K
+        else:
+            twim.FREQUENCY = frequency
+
+        twim.SHORTS = 0
+        twim.ENABLE = 6
+
+    def _clear_events(self):
+        self.twim.EVENTS_STOPPED = 0
+        self.twim.EVENTS_ERROR = 0
+        self.twim.EVENTS_LASTRX = 0
+        self.twim.EVENTS_LASTTX = 0
+
+    def _wait_stopped(self, timeout=1):
+        t0 = time.time()
+        while not self.twim.EVENTS_STOPPED:
+            if self.twim.EVENTS_ERROR:
+                self.twim.TASKS_STOP = 1
+                while not self.twim.EVENTS_STOPPED:
+                    if time.time() > t0 + timeout:
+                        raise TimeoutError("TWIM stop after error timed out")
+                return
+            if time.time() > t0 + timeout:
+                self.twim.TASKS_STOP = 1
+                raise TimeoutError("TWIM transaction timed out")
+
+    def _check_error(self):
+        if self.twim.EVENTS_ERROR:
+            src = int(self.twim.ERRORSRC)
+            self.twim.ERRORSRC = src  # W1C
+            self.twim.EVENTS_ERROR = 0
+            if src & 0x2:
+                raise IOError("TWIM: NACK on address")
+            if src & 0x4:
+                raise IOError("TWIM: NACK on data")
+            raise IOError("TWIM: error 0x%x" % src)
+
+    def write(self, addr, data):
+        """Write data bytes to 7-bit I2C address."""
+        if isinstance(data, (list, tuple)):
+            data = bytes(data)
+
+        self._gdb.write_mem(self.SCRATCH_ADDR, data)
+
+        self.twim.ADDRESS = addr
+        self.twim.TXD.PTR = self.SCRATCH_ADDR
+        self.twim.TXD.MAXCNT = len(data)
+        self.twim.RXD.MAXCNT = 0
+
+        self.twim.SHORTS = 0
+        self.twim.SHORTS.LASTTX_STOP = 1
+
+        self._clear_events()
+        self.twim.TASKS_STARTTX = 1
+
+        self._wait_stopped()
+
+        if self.twim.EVENTS_ERROR:
+            self.twim.ERRORSRC = int(self.twim.ERRORSRC)
+            self.twim.EVENTS_ERROR = 0
+            self.twim.SHORTS = 0
+            return False
+
+        self.twim.SHORTS = 0
+        return True
+
+    def read(self, addr, count):
+        """Read count bytes from 7-bit I2C address."""
+        self.twim.ADDRESS = addr
+        self.twim.RXD.PTR = self.SCRATCH_RX
+        self.twim.RXD.MAXCNT = count
+        self.twim.TXD.MAXCNT = 0
+
+        self.twim.SHORTS = 0
+        self.twim.SHORTS.LASTRX_STOP = 1
+
+        self._clear_events()
+        self.twim.TASKS_STARTRX = 1
+
+        self._wait_stopped()
+
+        if self.twim.EVENTS_ERROR:
+            self.twim.ERRORSRC = int(self.twim.ERRORSRC)
+            self.twim.EVENTS_ERROR = 0
+            self.twim.SHORTS = 0
+            return None
+
+        self.twim.SHORTS = 0
+        return self._gdb.read_mem(self.SCRATCH_RX, count)
+
+    def write_read(self, addr, data, count):
+        """Write then repeated-start read."""
+        if isinstance(data, (list, tuple)):
+            data = bytes(data)
+
+        self._gdb.write_mem(self.SCRATCH_ADDR, data)
+
+        self.twim.ADDRESS = addr
+        self.twim.TXD.PTR = self.SCRATCH_ADDR
+        self.twim.TXD.MAXCNT = len(data)
+        self.twim.RXD.PTR = self.SCRATCH_RX
+        self.twim.RXD.MAXCNT = count
+
+        self.twim.SHORTS = 0
+        self.twim.SHORTS.LASTTX_STARTRX = 1
+        self.twim.SHORTS.LASTRX_STOP = 1
+
+        self._clear_events()
+        self.twim.TASKS_STARTTX = 1
+
+        self._wait_stopped()
+
+        if self.twim.EVENTS_ERROR:
+            self.twim.ERRORSRC = int(self.twim.ERRORSRC)
+            self.twim.EVENTS_ERROR = 0
+            self.twim.SHORTS = 0
+            return None
+
+        self.twim.SHORTS = 0
+        return self._gdb.read_mem(self.SCRATCH_RX, count)
+
+    def read_reg(self, addr, reg, count=1):
+        """Convenience: write register address then read count bytes."""
+        result = self.write_read(addr, bytes([reg]), count)
+        if result is None:
+            raise IOError("I2C read_reg NACK addr=0x%02x reg=0x%02x" % (addr, reg))
+        if count == 1:
+            return result[0]
+        return result
+
+    def write_reg(self, addr, reg, data):
+        """Convenience: write register address + data byte(s)."""
+        if isinstance(data, int):
+            data = bytes([data])
+        if isinstance(data, (list, tuple)):
+            data = bytes(data)
+        ok = self.write(addr, bytes([reg]) + data)
+        if not ok:
+            raise IOError("I2C write_reg NACK addr=0x%02x reg=0x%02x" % (addr, reg))
+
 
 class SPI_nRF_SPIM:
     """SPI master interface using an nRF SPIM peripheral."""
