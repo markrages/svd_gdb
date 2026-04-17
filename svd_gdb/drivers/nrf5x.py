@@ -5,6 +5,12 @@ from .. import svd_gdb
 
 import struct
 
+
+class ReadbackProtectionError(RuntimeError):
+    """Raised when the device appears to be readback-protected (APPROTECT)."""
+    pass
+
+
 class NRF5xPin(base.Pin):
     def __init__(self, parent, pinnumber, ports):
         port = pinnumber // 32
@@ -590,9 +596,12 @@ class SPI_nRF_SPIM:
     CORE_CLOCK = 128_000_000
 
     def __init__(self, gdb, spim, sck, mosi, miso, csn=None,
-                 clock_frequency=None, cpol=0, cpha=0):
+                 clock_frequency=None, cpol=0, cpha=0,
+                 scratch_addr=None):
         self._gdb = gdb
         self.spim = spim
+        if scratch_addr is not None:
+            self.SCRATCH_ADDR = scratch_addr
         self.csn = csn
         self.sck = sck
         self.mosi = mosi
@@ -695,8 +704,8 @@ class I2C_nRF_TWIM:
         DMA.TX.MAXCNT   0x740
     """
 
-    SCRATCH_ADDR = 0x20000000  # TX buffer
-    SCRATCH_RX   = 0x20000100  # RX buffer (offset 256 bytes)
+    SCRATCH_ADDR_TX = 0x20000000
+    SCRATCH_ADDR_RX = 0x20000100
 
     # FREQUENCY register values
     FREQ_100K  = 0x01980000
@@ -704,9 +713,14 @@ class I2C_nRF_TWIM:
     FREQ_400K  = 0x06400000
     FREQ_1000K = 0x0FF00000
 
-    def __init__(self, gdb, twim, scl, sda, frequency=None):
+    def __init__(self, gdb, twim, scl, sda, frequency=None,
+                 scratch_addr_tx=None, scratch_addr_rx=None):
         self._gdb = gdb
         self.twim = twim
+        if scratch_addr_tx is not None:
+            self.SCRATCH_ADDR_TX = scratch_addr_tx
+        if scratch_addr_rx is not None:
+            self.SCRATCH_ADDR_RX = scratch_addr_rx
 
         twim.ENABLE = 0
 
@@ -774,10 +788,10 @@ class I2C_nRF_TWIM:
         if isinstance(data, (list, tuple)):
             data = bytes(data)
 
-        self._gdb.write_mem(self.SCRATCH_ADDR, data)
+        self._gdb.write_mem(self.SCRATCH_ADDR_TX, data)
 
         self.twim.ADDRESS = addr
-        self.twim.DMA.TX.PTR = self.SCRATCH_ADDR
+        self.twim.DMA.TX.PTR = self.SCRATCH_ADDR_TX
         self.twim.DMA.TX.MAXCNT = len(data)
         self.twim.DMA.RX.MAXCNT = 0
 
@@ -800,7 +814,7 @@ class I2C_nRF_TWIM:
     def read(self, addr, count):
         """Read count bytes from 7-bit I2C address. Returns bytes or None on NACK."""
         self.twim.ADDRESS = addr
-        self.twim.DMA.RX.PTR = self.SCRATCH_RX
+        self.twim.DMA.RX.PTR = self.SCRATCH_ADDR_RX
         self.twim.DMA.RX.MAXCNT = count
         self.twim.DMA.TX.MAXCNT = 0
 
@@ -818,19 +832,19 @@ class I2C_nRF_TWIM:
             return None
 
         self.twim.SHORTS = 0
-        return self._gdb.read_mem(self.SCRATCH_RX, count)
+        return self._gdb.read_mem(self.SCRATCH_ADDR_RX, count)
 
     def write_read(self, addr, data, count):
         """Write data then repeated-start read count bytes."""
         if isinstance(data, (list, tuple)):
             data = bytes(data)
 
-        self._gdb.write_mem(self.SCRATCH_ADDR, data)
+        self._gdb.write_mem(self.SCRATCH_ADDR_TX, data)
 
         self.twim.ADDRESS = addr
-        self.twim.DMA.TX.PTR = self.SCRATCH_ADDR
+        self.twim.DMA.TX.PTR = self.SCRATCH_ADDR_TX
         self.twim.DMA.TX.MAXCNT = len(data)
-        self.twim.DMA.RX.PTR = self.SCRATCH_RX
+        self.twim.DMA.RX.PTR = self.SCRATCH_ADDR_RX
         self.twim.DMA.RX.MAXCNT = count
 
         self._set_shorts(lasttx_dma_rx_start=True, lastrx_stop=True)
@@ -847,13 +861,13 @@ class I2C_nRF_TWIM:
             return None
 
         self.twim.SHORTS = 0
-        return self._gdb.read_mem(self.SCRATCH_RX, count)
+        return self._gdb.read_mem(self.SCRATCH_ADDR_RX, count)
 
 
 class NRF54(NRF5x):
     svd_name = 'nrf54l15_application.svd'
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, sanity_check=True, **kwargs,):
         super().__init__(*args, **kwargs)
         assert 'nRF54' in self._gdb.target_name
 
@@ -882,6 +896,27 @@ class NRF54(NRF5x):
         self._add_pins(32+32+32, [self.P0,
                                   self.P1,
                                   self.P2])
+
+        # Sanity-check FICR to detect readback protection
+        if(sanity_check):
+            device_id = int(self.FICR.INFO.DEVICEID[0])
+            if device_id == 0 or device_id == 0xFFFFFFFF:
+                raise ReadbackProtectionError(
+                    f"FICR.INFO.DEVICEID reads 0x{device_id:08X} — "
+                    f"device is likely readback-protected (APPROTECT). "
+                    f"Use NRF54.mass_erase_approtect() to clear or other method")
+
+    @staticmethod
+    def mass_erase_approtect(target=None):
+        """EXPERIMENTAL: Mass-erase to clear APPROTECT readback protection.
+        Unknown how widely this will work and it's not expansively tested and
+        may depend on how the SWD scan returns on monitor.
+
+        This erases ALL flash and UICR contents. The device will be blank
+        after this operation. A reconnect is required afterward.
+        """
+        gdb = svd_gdb.GdbInterface(target)
+        gdb.gdb.monitor("erase_mass")
 
     # AIN pin mapping for nRF54L15 (QFN48)
     # All AIN pins are on Port 1
@@ -947,14 +982,19 @@ class NRF54(NRF5x):
         return value * ref / (gain * res)
 
     def spi(self, spim, sck, mosi, miso, csn=None,
-            clock_frequency=None, cpol=0, cpha=0):
+            clock_frequency=None, cpol=0, cpha=0,
+            scratch_addr=None):
         """Return an SPI instance for the given SPIM peripheral and pins."""
         return SPI_nRF_SPIM(self._gdb, spim, sck, mosi, miso, csn,
-                            clock_frequency, cpol, cpha)
+                            clock_frequency, cpol, cpha,
+                            scratch_addr=scratch_addr)
 
-    def i2c(self, twim, scl, sda, frequency=None):
+    def i2c(self, twim, scl, sda, frequency=None,
+            scratch_addr_tx=None, scratch_addr_rx=None):
         """Return an I2C instance for the given TWIM peripheral and pins."""
-        return I2C_nRF_TWIM(self._gdb, twim, scl, sda, frequency)
+        return I2C_nRF_TWIM(self._gdb, twim, scl, sda, frequency,
+                            scratch_addr_tx=scratch_addr_tx,
+                            scratch_addr_rx=scratch_addr_rx)
 
 
 if __name__=="__main__":
